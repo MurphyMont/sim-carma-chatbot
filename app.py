@@ -6,14 +6,35 @@ import os
 app = Flask(__name__)
 app.secret_key = 'replace-this-with-a-strong-secret'
 
-# Create OpenAI client (reads OPENAI_API_KEY from environment)
+# OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 SYSTEM_PROMPT = """
-You are a soft skills training assistant. Your job is to simulate realistic workplace conversations to evaluate and improve soft skills like communication, leadership, teamwork, adaptability, and problem-solving.
+You are a soft skills training assistant.
 
-Start by presenting a realistic scenario. After the user responds, evaluate their soft skills, give constructive feedback, and generate the next scenario. Keep the tone supportive and focused on learning, also give about 5 senteces for the feedback not too detailed , and dont say something like Feedback is , that sounds too robotic. One challenge at a time.
+Your job is to simulate realistic workplace conversations to evaluate and improve soft skills like communication, leadership, teamwork, adaptability, and problem-solving.
+
+Start by presenting a realistic workplace scenario only after the user types "start".
+
+After the user responds:
+- evaluate their soft skills
+- give constructive and supportive feedback
+- keep feedback natural and human (do not say "Feedback:")
+- keep feedback around 4–5 sentences
+- then generate the next realistic scenario
+
+Only give one challenge at a time.
+Keep the tone professional, supportive, and focused on learning.
 """
+
+WELCOME_MESSAGE = """
+Welcome to Sim Carma!
+
+I’ll help you improve your soft skills through realistic workplace scenarios involving leadership, teamwork, communication, deadlines, and problem-solving.
+
+Type "start" when you're ready for your first scenario.
+"""
+
 
 @app.route('/')
 def home():
@@ -22,61 +43,59 @@ def home():
 
 @app.route('/index')
 def index():
-    # Start new session-based conversation
+    # Start fresh session
     session['conversation'] = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "assistant",
-            "content": (
-                "Welcome to Sim Carma! Let's start your soft skills training.\n\n"
-                "Scenario 1:\nYou're leading a team and one member is consistently "
-                "missing deadlines. How would you handle it?"
-            )
-        }
+        {"role": "assistant", "content": WELCOME_MESSAGE}
     ]
+
     return render_template(
         'chat.html',
-        initial_question=session['conversation'][-1]['content'],
+        initial_question=WELCOME_MESSAGE,
         now=datetime.now()
     )
 
+
 @app.route('/get', methods=['POST'])
 def chat():
-    # Make sure conversation exists
     if 'conversation' not in session:
         session['conversation'] = [
-            {"role": "system", "content": SYSTEM_PROMPT}
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "assistant", "content": WELCOME_MESSAGE}
         ]
 
     user_msg = request.form['msg']
-    session['conversation'].append({"role": "user", "content": user_msg})
+    session['conversation'].append({
+        "role": "user",
+        "content": user_msg
+    })
 
-    # ✅ New style call with the v1 client
-    completion = client.chat.completions.create(
-        model="gpt-4.1",
-        messages=session['conversation']
-    )
+    try:
+        completion = client.chat.completions.create(
+            model="gpt-4.1",
+            messages=session['conversation']
+        )
 
-    reply = completion.choices[0].message.content
-    session['conversation'].append({"role": "assistant", "content": reply})
+        reply = completion.choices[0].message.content
 
-    return reply
+        session['conversation'].append({
+            "role": "assistant",
+            "content": reply
+        })
+
+        session.modified = True
+
+        return reply
+
+    except Exception as e:
+        return f"Error: {str(e)}"
+
 
 @app.route('/restart')
 def restart():
-    # Reset conversation
-    session['conversation'] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "assistant",
-            "content": (
-                "Welcome back to Sim Carma! Let's begin again.\n\n"
-                "Scenario 1:\nYou're leading a team and one member is consistently "
-                "missing deadlines. How would you handle it?"
-            )
-        }
-    ]
+    session.pop('conversation', None)
     return redirect(url_for('index'))
+
 
 if __name__ == '__main__':
     app.run(debug=True)
